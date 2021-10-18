@@ -211,10 +211,31 @@ TargaImage* TargaImage::Load_Image(char *filename)
 //  success of operation.
 //
 ///////////////////////////////////////////////////////////////////////////////
+//// 
 bool TargaImage::To_Grayscale()
 {
-    ClearToBlack();
-    return false;
+    unsigned char* grayscale = new unsigned char[width * height * 4];
+    int		    i = 0, j;
+    int         gray;
+
+    if (!data)
+        return NULL;
+
+    printf("Image are in grayscale: (number of storage)%d\n", width * height * 4);
+    // calculate grayscale by I = 0.299r + 0.587g + 0.114b
+    while ( i < (width * height * 4))
+    {
+        gray = int(0.299 * (int)data[i] + 0.587 * (int)data[i + 1] + 0.114 * (int)data[i + 2]);
+        //printf("%d\n", gray);
+        grayscale[i] = gray;
+        grayscale[i + 1] = gray;
+        grayscale[i + 2] = gray;
+        grayscale[i + 3] = data[i + 3];
+        i = i + 4;
+    }
+
+    data = grayscale;
+return true;
 }// To_Grayscale
 
 
