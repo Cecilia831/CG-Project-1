@@ -14,6 +14,7 @@
 #include "Globals.h"
 #include "TargaImage.h"
 #include "libtarga.h"
+
 #include <stdlib.h>
 #include <assert.h>
 #include <memory.h>
@@ -22,6 +23,7 @@
 #include <sstream>
 #include <vector>
 #include <algorithm>
+#include <stdio.h>
 
 using namespace std;
 
@@ -30,6 +32,7 @@ const int           RED             = 0;                // red channel
 const int           GREEN           = 1;                // green channel
 const int           BLUE            = 2;                // blue channel
 const unsigned char BACKGROUND[3]   = { 0, 0, 0 };      // background color
+
 
 
 // Computes n choose s, efficiently
@@ -50,9 +53,8 @@ double Binomial(int n, int s)
 //      Constructor.  Initialize member variables.
 //
 ///////////////////////////////////////////////////////////////////////////////
-TargaImage::TargaImage() : width(0), height(0), data(NULL)
+TargaImage::TargaImage() : width(0), height(0), image_size(0), data(NULL), rgb_data(NULL), gray_data(NULL)
 {}// TargaImage
-
 ///////////////////////////////////////////////////////////////////////////////
 //
 //      Constructor.  Initialize member variables.
@@ -214,9 +216,9 @@ TargaImage* TargaImage::Load_Image(char *filename)
 //// 
 bool TargaImage::To_Grayscale()
 {
-    unsigned char* grayscale = new unsigned char[width * height * 4];
-    int		    i = 0, j;
-    int         gray;
+    unsigned char*   grayscale = new unsigned char[width * height * 4];
+    int		         i = 0, j;
+    int              gray;
 
     if (!data)
         return NULL;
@@ -232,10 +234,11 @@ bool TargaImage::To_Grayscale()
         grayscale[i + 2] = gray;
         grayscale[i + 3] = data[i + 3];
         i = i + 4;
-    }
+    } 
 
     data = grayscale;
-return true;
+    delete grayscale;
+    return true;
 }// To_Grayscale
 
 
@@ -247,8 +250,52 @@ return true;
 ///////////////////////////////////////////////////////////////////////////////
 bool TargaImage::Quant_Uniform()
 {
-    ClearToBlack();
-    return false;
+    // The use 3-bit R, 3-bit G, and 2-bit B
+    const int R_Q_BIT = 3;
+    const int G_Q_BIT = 3;
+    const int B_Q_BIT = 2;
+
+    // Quantum scaling factor
+    int	      scale[3];
+    int		  i, j;
+    int       in_offset, out_offset;
+    int       temp = 0;
+
+    unsigned  char* RGB_data;
+
+    // Getting the scaling factor
+    //scale[0] = pow(2, 8) / pow(2, R_Q_BIT);
+    //scale[1] = pow(2, 8) / pow(2, G_Q_BIT);
+    //scale[2] = pow(2, 8) / pow(2, B_Q_BIT);
+
+
+    scale[0] = 8 - R_Q_BIT;
+    scale[1] = 8 - G_Q_BIT;
+    scale[2] = 8 - B_Q_BIT;
+
+    // Transform RGBA to RGB 
+    RGB_data = To_RGB();
+
+    // Quantumize each pixel
+    for (i = 0; i < image_size; i++) {
+        in_offset = 3 * i;
+        out_offset = 4 * i;
+        for (j = 0; j < 3; j++) {
+            // Directly truncate the result
+            // it use directly truncate not round off
+
+            RGB_data[in_offset + j] = RGB_data[in_offset + j] >> scale[j];
+            RGB_data[in_offset + j] = RGB_data[in_offset + j] << scale[j];
+
+            // R = 255 * r * alpha = r * (alpha* 255) = r * Alpha 
+            data[out_offset + j] = (double)RGB_data[in_offset + j] / 255.0
+                * data[out_offset + 3];
+        }
+    }
+    delete[] RGB_data;
+    return true;
+
+    
 }// Quant_Uniform
 
 
@@ -284,8 +331,41 @@ bool TargaImage::Dither_Threshold()
 ///////////////////////////////////////////////////////////////////////////////
 bool TargaImage::Dither_Random()
 {
-    ClearToBlack();
-    return false;
+    // Temporary variable
+    int i, j;
+    double temp;
+    //Starting point
+    int offset;
+    int image_size = width * height * 4;
+    // Transform the image to gray scale
+    To_Grayscale();
+
+    for (i = 0; i < image_size; i++) {
+        // gray number + [-0.2, 0.2] random number
+        temp = gray_data[i] + (0.4 * rand() / RAND_MAX - 0.2);
+
+        // Threshold the result
+        if (temp < 0.5)
+            gray_data[i] = 0.0;
+        else
+            gray_data[i] = 1.0;
+
+        // Threshold the Alpha value
+        offset = 4 * i;
+        if (data[offset + 3] < 128) {
+            data[offset + 3] = 0;
+            for (j = 0; j < 3; j++)
+                data[offset + j] = 0;
+        }
+
+        else {
+            data[offset + 3] = 255;
+            for (j = 0; j < 3; j++)
+                data[offset + j] = gray_data[i] * 255.0;
+        }
+    }
+
+    return true;
 }// Dither_Random
 
 
@@ -310,7 +390,6 @@ bool TargaImage::Dither_FS()
 ///////////////////////////////////////////////////////////////////////////////
 bool TargaImage::Dither_Bright()
 {
-    ClearToBlack();
     return false;
 }// Dither_Bright
 
@@ -347,17 +426,55 @@ bool TargaImage::Dither_Color()
 //  operation.
 //
 ///////////////////////////////////////////////////////////////////////////////
-bool TargaImage::Comp_Over(TargaImage* pImage)
-{
-    if (width != pImage->width || height != pImage->height)
+    bool TargaImage::Comp_Over(TargaImage* pImage)
     {
-        cout <<  "Comp_Over: Images not the same size\n";
-        return false;
-    }
+        if (width != pImage->width || height != pImage->height)
+        {
+            cout <<  "Comp_Over: Images not the same size\n";
+            return false;
+        }
+        /*
+        int i = 0;
+        int iSize = width * height * 4;
+        
+        unsigned char* tdata = pImage->data;
+        unsigned char* temp= new unsigned char[iSize];
+        
+        while (i < (width * height * 4))
+        {   
+            RGBA_To_RGB(data+i, temp+i);
+            printf("%d %d %d %d",temp,temp+1,temp+2,temp+3);
+            i = i + 4;
+            
+        }
+        
 
-    ClearToBlack();
-    return false;
-}// Comp_Over
+        /*
+        //Pre-Multiplied Alpha of G
+        i = 0;
+        unsigned char* pdata = pImage->data;
+
+        while (i < (width * height * 4))
+        {
+            pdata[i + 3] = float(pdata[i + 3]) / float(255);
+
+            pdata[i]     = float ((pdata[i]) * float(pdata[i + 3]));
+            pdata[i+1]   = float  ((pdata[i+1])* float(pdata[i + 3]));
+            pdata[i+2]   = float  ((pdata[i+2])* float(pdata[i + 3]));
+            i = i + 4;
+        }
+        
+        //Comp-over
+        unsigned char* c0 = new unsigned char[width * height * 4];
+        while (i < (width * height * 4))
+        {
+            c0[i] = (float)data[i] + (float)(1 - (float)data[i + 3]) * (float)pdata[i];
+            i = i + 4;
+        }
+       */
+        //data = tdata; */
+        return true;
+    }// Comp_Over
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -649,7 +766,7 @@ void TargaImage::RGBA_To_RGB(unsigned char *rgba, unsigned char *rgb)
 		    rgb[i] = val;
 	    }
     }
-}// RGA_To_RGB
+}// RGBA_To_RGB
 
 
 ///////////////////////////////////////////////////////////////////////////////

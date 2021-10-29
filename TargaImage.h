@@ -68,7 +68,7 @@ class TargaImage
         bool Resize(float scale);
         bool Rotate(float angleDegrees);
 
-    private:
+
 	// helper function for format conversion
         void RGBA_To_RGB(unsigned char *rgba, unsigned char *rgb);
 
@@ -86,6 +86,12 @@ class TargaImage
         int		width;	    // width of the image in pixels
         int		height;	    // height of the image in pixels
         unsigned char	*data;	    // pixel data for the image, assumed to be in pre-multiplied RGBA format.
+        // For holding the size of the image
+        int             image_size;
+        // For holding the data of rgb image
+        double* rgb_data;
+        // For holding the data in grayscale
+        double* gray_data;
 
 };
 
